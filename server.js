@@ -1,80 +1,56 @@
-const mongoose = require('mongoose')
-const { model, Schema } = mongoose
+const { ApolloServer, gql } = require('apollo-server-express')
+const http = require('http')
+const { initMongo, M } = require('./mongoose')
+
+const { composeWithMongoose } = require('graphql-compose-mongoose/node8')
+const { schemaComposer } = require('graphql-compose')
 
 const app = require('express')()
 
-mongoose.connect('mongodb://localhost:27017/relation', { useNewUrlParser: true })
+initMongo()
+const Department = M('department')
+const Employee = M('employee')
+const Company = M('company')
 
-const Department = model('department',
-  new Schema({
-    name: String,
-    location: String
-  }))
+const CompanyTC = composeWithMongoose(Company, {})
 
-const Employee = model('employee',
-  new Schema({
-    firstName: String,
-    lastName: String,
-    mobile: String,
-    department: { type: Schema.Types.ObjectId, ref: 'department' }
-  }))
+schemaComposer.Query.addFields({
+  companyById: CompanyTC.getResolver('findById'),
+  companyByIds: CompanyTC.getResolver('findByIds'),
+  companyOne: CompanyTC.getResolver('findOne'),
+  companyMany: CompanyTC.getResolver('findMany'),
+  companyCount: CompanyTC.getResolver('count'),
+});
 
-const Company = model('company',
-  new Schema({
-    name: String,
-    address: String,
-    employees: [{ type: Schema.Types.ObjectId, ref: 'employee' }]
-  }))
-
-app.use("/", async (req, res) => {
-
-  await Department.remove({})
-  await Department.create({
-    name: 'IT Department',
-    location: 'Biliding A'
-  })
-  await Department.create({
-    name: 'Marketng Department',
-    location: 'Biliding B'
-  })
-
-  await Employee.remove({})
-  await Employee.create({
-    firstName: 'eric',
-    lastName: 'bishard',
-    mobile: '321-123-0001',
-    department: await Department.findOne({ name: 'IT Department' })
-  })
-  await Employee.create({
-    firstName: 'gina',
-    lastName: 'bishard',
-    mobile: '321-123-0002',
-    department: await Department.findOne({ name: 'Marketng Department' })
-  })
-
-  await Company.remove({})
-  await Company.create({
-    name: 'Bigco Ink',
-    address: '123 Anywhere St',
-    employees: await Employee.find()
-  })
-
-  res.json({
-    deartments: await Department.find(),
-    employees: await Employee.find(),
-    employeesWithDepartmentNested: await Employee.find().populate('department', 'name'),
-    company: await Company.find(),
-    companyWithEmployeesAndDepartmentsNested: 
-      await Company.find()
-        .populate(
-          {
-            path: 'employees', 
-            model: 'employee', 
-            populate: {
-              path: 'department', 
-              model: 'department'
-            }
-          }),
-  })
+schemaComposer.Mutation.addFields({
+  companyCreateOne: CompanyTC.getResolver('createOne'),
+  companyCreateMany: CompanyTC.getResolver('createMany'),
+  companyUpdateById: CompanyTC.getResolver('updateById'),
+  companyUpdateOne: CompanyTC.getResolver('updateOne'),
+  companyUpdateMany: CompanyTC.getResolver('updateMany'),
+  companyRemoveById: CompanyTC.getResolver('removeById'),
+  companyRemoveOne: CompanyTC.getResolver('removeOne'),
+  companyRemoveMany: CompanyTC.getResolver('removeMany'),
 })
-app.listen(7777, () => console.log("running on 7777"))
+
+const EmployeeTC = composeWithMongoose(Employee, {})
+const DepartmentTC = composeWithMongoose(Department, {})
+
+CompanyTC.addRelation('employees', {
+  resolver: () => EmployeeTC.getResolver('findByIds'),
+  prepareArgs: {
+    _ids: source => source.employees || []
+  },
+  projection: { employees: true },
+})
+
+const graphqlSchema = schemaComposer.buildSchema()
+
+const server = new ApolloServer({ schema: graphqlSchema })
+server.applyMiddleware({ app })
+
+const httpServer = http.createServer(app)
+httpServer.listen({ port: 3040 }, () => {
+  console.log(` Server ready at http://0.0.0.0:${3040}${server.graphqlPath}`)
+  console.log(` Subscriptions ready at ws://0.0.0.0:${3040}${server.subscriptionsPath}`)
+})
