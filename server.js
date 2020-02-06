@@ -44,6 +44,14 @@ CompanyTC.addRelation('employees', {
   projection: { employees: true },
 })
 
+EmployeeTC.addRelation('department', {
+  resolver: () => DepartmentTC.getResolver('findById'),
+  prepareArgs: {
+    _id: source => source.department || []
+  },
+  projection: { department: true },
+})
+
 const graphqlSchema = schemaComposer.buildSchema()
 
 const server = new ApolloServer({ schema: graphqlSchema })
